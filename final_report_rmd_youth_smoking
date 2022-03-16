@@ -1,0 +1,115 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Smoke in Youth
+
+Starting Smoking in an early age is concerned as a problematic phenomenon recently. This report analyzes the dataset smoke.RData associated with 2014 American National Youth Tobacco Survey, with 7 variables Age(>9), Age_first_tried_cigt_smkg, Sex, Race, state, school, RuralUrban selected to form new dataset “forINLA” for analyzation. Two hypotheses are carrying out: for one, larger variation for geographic (between states) than schools results in the tobacco control programs should focus more on the earliest-smoking-aged states rather than particular schools. For the other,  the hazard function of first cigarette smoking shows a flat line, which indicate age will not effect the probability of trying cigarettes for non-smoking children within next month if they have identical confounders.
+From the dataset forINLA, we first create a survival object named “smokeResponse” which is using as a response variable in our survival model:
+
+smokeResponse ~ RuralUrban + Sex * Race + f(school,…) + f(state,…)
+
+the data is left censoring since the first smoking happened before the survey so the time is not precise or obvious. Variables school and state are priors, following log-Norm distribution. RuralUrban, Sex, Race are chosen as posteriors, where the interactions between variables Sex and Race are included. We choose Weibull GLM for modeling, which follows the function:
+
+$Y{i}$ ~ Weibull($\lambda{i}$, $\alpha$)
+
+Where $\lambda{i}$ is the scale parameter and alpha is the shape parameter. By the prior assumptions, some states are double or triple the rate of smoking than others, so we want the random effect Ui for state i follows exp(Ui) = 2 or 3, unlikely at 10, and within a given state, the smoking rate between ‘worst’ schools and ‘healthiest’ school is expected to have at most 50%, or the random effect of school should be at largest exp(Vij) = 1.5. At the same time, the hazard function is expected to be flat. Basing on those assumptions, A Normal(log(3), (2/3)^(-2)) distribution for the log of the intercept parameter will be reasonable with the quantile:
+
+```{r, echo=FALSE}
+smokeFile = Pmisc::downloadIfOld("http://pbrown.ca/teaching/appliedstats/data/smoke.RData")
+
+load(smokeFile)
+smoke = smoke[smoke$Age > 9, ]
+forInla = smoke[, c("Age", "Age_first_tried_cigt_smkg",
+"Sex", "Race", "state", "school", "RuralUrban")]
+forInla = na.omit(forInla)
+forInla$school = factor(forInla$school)
+library("INLA")
+forSurv = data.frame(time = (pmin(forInla$Age_first_tried_cigt_smkg,
+forInla$Age) - 4)/10, event = forInla$Age_first_tried_cigt_smkg <=
+forInla$Age)
+# left censoring
+forSurv[forInla$Age_first_tried_cigt_smkg == 8, "event"] = 2
+smokeResponse = inla.surv(forSurv$time, forSurv$event)
+
+fitS2 = inla(smokeResponse ~ RuralUrban + Sex * Race +
+f(school, model = "iid", hyper = list(prec = list(prior = "pc.prec",
+param = c(0.5, 0.05)))) + f(state, model = "iid",
+hyper = list(prec = list(prior = "pc.prec", param = c(0.5,
+0.05)))), control.family = list(variant = 1,
+hyper = list(alpha = list(prior = "normal", param = c(log(3.5),
+(2/3)^(-2))))), control.mode = list(theta = c(8,
+2, 5), restart = TRUE), data = forInla, family = "weibullsurv",
+verbose = TRUE)
+```
+
+
+
+```{r, echo=FALSE}
+exp(qnorm(c(0.025, 0.5, 0.975), mean = log(3.5), sd = (2/3)^(-2)))
+```
+
+The result is showing in the following table:
+
+```{r, echo=FALSE}
+rbind(fitS2$summary.fixed[, c("mean", "0.025quant",
+"0.975quant")], Pmisc::priorPostSd(fitS2)$summary[,
+c("mean", "0.025quant", "0.975quant")])
+```
+
+And the graph of prior and posterior densities of model parameters related is showing below:
+
+```{r, echo=FALSE}
+fitS2$priorPost = Pmisc::priorPost(fitS2)
+for (Dparam in fitS2$priorPost$parameters) {
+  do.call(matplot, fitS2$priorPost[[Dparam]]$matplot)}
+fitS2$priorPost$legend$x = "topleft"
+do.call(legend, fitS2$priorPost$legend)
+```
+
+
+Back to the hypothesis, from the table above we can see the variation of state is less than the variation amongst schools, 
+which means the tobacco control programs may target on the schools with highest rate rather than states. 
+
+
+## Appendix
+
+```{r, eval=FALSE}
+smokeFile = Pmisc::downloadIfOld("http://pbrown.ca/teaching/appliedstats/data/smoke.RData")
+
+load(smokeFile)
+smoke = smoke[smoke$Age > 9, ]
+forInla = smoke[, c("Age", "Age_first_tried_cigt_smkg",
+"Sex", "Race", "state", "school", "RuralUrban")]
+forInla = na.omit(forInla)
+forInla$school = factor(forInla$school)
+library("INLA")
+forSurv = data.frame(time = (pmin(forInla$Age_first_tried_cigt_smkg,
+forInla$Age) - 4)/10, event = forInla$Age_first_tried_cigt_smkg <=
+forInla$Age)
+# left censoring
+forSurv[forInla$Age_first_tried_cigt_smkg == 8, "event"] = 2
+smokeResponse = inla.surv(forSurv$time, forSurv$event)
+
+fitS2 = inla(smokeResponse ~ RuralUrban + Sex * Race +
+f(school, model = "iid", hyper = list(prec = list(prior = "pc.prec",
+param = c(0.5, 0.05)))) + f(state, model = "iid",
+hyper = list(prec = list(prior = "pc.prec", param = c(0.5,
+0.05)))), control.family = list(variant = 1,
+hyper = list(alpha = list(prior = "normal", param = c(log(4),
+(2/3)^(-2))))), control.mode = list(theta = c(8,
+2, 5), restart = TRUE), data = forInla, family = "weibullsurv",
+verbose = TRUE)
+
+rbind(fitS2$summary.fixed[, c("mean", "0.025quant",
+"0.975quant")], Pmisc::priorPostSd(fitS2)$summary[,
+c("mean", "0.025quant", "0.975quant")])
+
+fitS2$priorPost = Pmisc::priorPost(fitS2)
+for (Dparam in fitS2$priorPost$parameters) {
+  do.call(matplot, fitS2$priorPost[[Dparam]]$matplot)}
+fitS2$priorPost$legend$x = "topleft"
+do.call(legend, fitS2$priorPost$legend)
+```
+
